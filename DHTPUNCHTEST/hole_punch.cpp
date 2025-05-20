@@ -107,6 +107,7 @@ void sender() {
 
     dc->onOpen([&] {
         app.AppendLog("연결 성립됨!\n");
+
         FileHeader header = {};
         strncpy_s(header.file_name, file_name.c_str(), sizeof(header.file_name) - 1);
         header.file_size = file_size;
@@ -114,19 +115,24 @@ void sender() {
         dc->send(reinterpret_cast<const rtc::byte*>(&header), sizeof(FileHeader));
 
         const size_t CHUNK_SIZE = 256 * 1024;
-        size_t offset = 0;
+        std::vector<rtc::byte> buffer(CHUNK_SIZE);
 
-        while (offset < file_size) {
-            size_t chunk_size = std::min(CHUNK_SIZE, file_size - offset);
-            dc->send(file_data + offset, chunk_size);
-            offset += chunk_size;
+        size_t total_sent = 0;
+        while (!feof(file)) {
+            size_t bytes_read = fread(buffer.data(), 1, CHUNK_SIZE, file);
+            if (bytes_read > 0) {
+                dc->send(buffer.data(), bytes_read);
+                total_sent += bytes_read;
 
-            // 너무 빠른 전송 방지 (optional)
-            std::this_thread::sleep_for(5ms);
+                // optional throttling
+                std::this_thread::sleep_for(5ms);
+            }
         }
 
+        fclose(file);
         dc->send("over");
     });
+
 
     dc->onMessage([](std::variant<rtc::binary, std::string> msg) {
         if (std::holds_alternative<std::string>(msg)) {
@@ -195,16 +201,6 @@ void sender() {
     std::string tmp = "보낼 파일 : " + file_name + "\n";
     tmp += "파일 크기 : " + std::to_string(file_size) + "\n";
     app.AppendLog(tmp.c_str());
-
-    file_data = new rtc::byte[file_size];
-    size_t read_bytes = fread(file_data, 1, file_size, file);
-    if (read_bytes != file_size) {
-        app.AppendLog("파일 읽기 실패\n");
-        fclose(file);
-        delete[] file_data;
-        return;
-    }
-
     
     pc->setLocalDescription();
 
